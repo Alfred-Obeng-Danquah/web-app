@@ -1,54 +1,75 @@
-pipeline{
-  agent any
-  tools{
-    maven "maven3.8.8"
-  }
+pipeline {
+    agent any
+    
+    tools {
+        maven "maven3.9.6"
+    }
 
-    stages{
-      stage("1. Git clone from repo"){
-        steps{
-         sh "echo start of git clone"
-         git branch: 'main', url: 'https://github.com/JOMACS-IT/web-app.git'
-         sh "echo end of git clone"
+    stages {
+        stage("Git clone") {
+            steps {
+                git branch: 'main', url: 'https://github.com/Alfred-Obeng-Danquah/web-app.git'
+            }
         }
-      }
-      
-      stage("2. Build from Maven"){
-        steps{
-          sh "echo start building from Maven"
-          sh "mvn clean package"
-          sh "echo end of build"
-        }  
-      }
-      
-      stage("3. Code Scan"){
-        steps{
-          sh "echo start of code scan"
-          sh "mvn sonar:sonar"
-          sh "echo end of code scan"
-        }  
-      }
-      
-      stage("4. Store Artifacts"){
-        steps{
-           sh "echo Deploy Artifact"
-           sh "mvn deploy"
-        }  
-      }
-      
-      stage("5. Deploying to Tomcat in UAT"){
-        steps{
-           sh "echo start deploying to server in UAT Env"
-           deploy adapters: [tomcat9(credentialsId: 'tomcat_cred', path: '', url: 'http://18.117.162.68:9090')], contextPath: null, war: 'target/*.war'
-        }  
-      }
-      
-      stage("6. Email Notification"){
-        steps{
-            sh "echo Email Notification to DevOps Team"
-            emailext body: 'The Deployment is Successful', subject: 'Deployment Success', to: 'info@jomacsit.com'
-        }  
-      }
+
+        stage("Build and Test") {
+            steps {
+                script {
+                    // Build
+                    sh "mvn clean package"
+                    // Test
+                    sh "mvn test"
+                }
+            }
+        }
+
+        stage("Package with Maven") {
+            steps {
+                sh "mvn package"
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                // Run SonarQube scanner
+                withSonarQubeEnv('sonarqube') {
+                    sh "${tool 'sonar5.0'}/bin/sonar-scanner -Dsonar.projectKey=jomacs"
+                }
+            }
+        }
+        
+        stage("Upload to Nexus") {
+            steps {
+                nexusArtifactUploader(
+                    artifacts: [[artifactId: 'maven-web-application', 
+                                  classifier: '', 
+                                  file: '/var/lib/jenkins/workspace/first-pipeline-job/target/web-app.war', 
+                                  type: 'war']], 
+                    credentialsId: 'nexus-id', 
+                    groupId: 'com.mt', 
+                    nexusUrl: '34.201.164.17:8081',
+                    nexusVersion: 'nexus3', 
+                    protocol: 'http', 
+                    repository: 'webapp-Release', 
+                    version: '3.1.2-RELEASE'
+                )
+            }
+        }
+        
+        stage("Deploy to UAT") {
+            steps {
+                deploy adapters: [tomcat9(credentialsId: 'tomcat-id', path: '', url: 'http://44.208.21.84:8080/')], contextPath: null, war: 'target/*.war'
+            }
+        }
+    }
+    
+    post {
+        success {
+            slackSend channel: '#team-canada', color: 'good', message: "Build successful: ${currentBuild.fullDisplayName}"
+        }
+        failure {
+            slackSend channel: '#team-canada', color: 'danger', message: "Build failed: ${currentBuild.fullDisplayName}"
+        }
     }
 }
 
